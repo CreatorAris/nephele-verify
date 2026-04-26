@@ -77,9 +77,9 @@ All in one HTML file. Inspect with view-source.
 
 ## Reporting issues
 
-Bugs in the verifier — false positives, false negatives, ASN.1 edge cases, i18n typos — file an issue here.
+Bugs in the verifier — false positives, false negatives, ASN.1 edge cases, i18n typos — file an issue here. PRs welcome; this repo is the source of truth for `verify.arisfusion.com`.
 
-Feature requests for the broader Nephele Workshop product belong upstream against the main project, not here.
+Feature requests for the broader Nephele Workshop product (the desktop client itself) — the client tree is closed-source, so file them via the contact address on the [website](https://nephele.arisfusion.com), not here.
 
 ## License
 

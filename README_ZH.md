@@ -77,9 +77,9 @@ xdg-open index.html   # Linux
 
 ## 反馈
 
-验证器自身的 bug —— 漏判、误判、ASN.1 边界情况、翻译错别字 —— 在本仓库提 issue。
+验证器自身的 bug —— 漏判、误判、ASN.1 边界情况、翻译错别字 —— 在本仓库提 issue。欢迎 PR：本仓库就是 `verify.arisfusion.com` 的代码源头，合并即上线。
 
-Nephele Workshop 主产品的功能需求请到主项目提 PR，不要发到本仓库。
+Nephele Workshop 桌面端本身的功能需求 —— 桌面端代码是闭源的，请通过 [官网](https://nephele.arisfusion.com) 上的联系方式提交，不要发到本仓库。
 
 ## License
 
