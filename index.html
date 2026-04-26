@@ -1,0 +1,2212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nephele Workshop · 数字存证验证</title>
+<meta name="description" content="验证 Nephele Workshop 生成的数字存证文件 (.nep)，确认作品哈希、时间戳和 Merkle Tree 完整性。">
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- JSZip from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+/* ============================================================
+   Nephele Verification Page
+   Aesthetic: Fairy-tale certificate — soft purples, gold accents,
+   parchment textures, elegant serif headings
+   ============================================================ */
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* Fairy Purple palette (from Theme.qml) */
+  --purple:        #CEACE0;
+  --purple-light:  #E0C5ED;
+  --purple-dark:   #C498D3;
+  --purple-deep:   #9B7AAF;
+  --purple-bg:     #F8F3FB;
+  --purple-bg-mid: #F0E8F5;
+
+  /* Gold accents (from pdf_generator.py) */
+  --gold:          #D4A574;
+  --gold-light:    #E8C9A8;
+  --gold-dark:     #B8895A;
+
+  /* Functional (muted to harmonize with purple/gold) */
+  --success:       #4A8A7E;      /* dusty teal */
+  --success-soft:  #7FAFA4;
+  --success-bg:    #F2F7F5;
+  --error:         #A24747;      /* dusty rose */
+  --error-soft:    #C47575;
+  --error-bg:      #F9EEEE;
+  --warning:       #B87933;      /* dusty amber */
+  --warning-soft:  #D49E60;
+  --warning-bg:    #F8F1E9;
+
+  /* Text */
+  --text-1:        #333333;
+  --text-2:        #666666;
+  --text-3:        #999999;
+  --bg-canvas:     #F8F6FB;
+  --bg-card:       #FFFFFF;
+
+  /* Type */
+  --font-display:  'Cormorant Garamond', 'Georgia', 'Songti SC', serif;
+  --font-body:     'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --font-mono:     'JetBrains Mono', 'Consolas', monospace;
+
+  /* Spacing */
+  --r-sm: 8px;
+  --r-md: 16px;
+  --r-lg: 24px;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text-1);
+  background: var(--bg-canvas);
+  min-height: 100vh;
+  line-height: 1.7;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* === Decorative background (subtle, no animation) === */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 15% 5%, rgba(206,172,224,0.10), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 90% 95%, rgba(212,165,116,0.06), transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* === Layout === */
+.page-wrapper {
+  position: relative;
+  z-index: 1;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 4rem;
+}
+
+/* === Header === */
+.site-header {
+  text-align: center;
+  margin-bottom: 3.5rem;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+  padding: 0.4rem 0.9rem 0.4rem 0.45rem;
+  border: 1px solid rgba(206,172,224,0.35);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(6px);
+}
+
+.brand-icon {
+  width: 26px;
+  height: 26px;
+  background: linear-gradient(135deg, var(--purple) 0%, var(--purple-deep) 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(155,122,175,0.3), inset 0 0 0 1px rgba(255,255,255,0.25);
+}
+
+.brand-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--purple-deep);
+  letter-spacing: 0.04em;
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 2.8rem;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1.2;
+  margin-bottom: 1rem;
+  letter-spacing: -0.005em;
+}
+
+.page-title .accent {
+  color: var(--purple-deep);
+  font-style: italic;
+}
+
+.page-subtitle {
+  font-size: 0.9rem;
+  color: var(--text-2);
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+.page-subtitle kbd {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  padding: 0.08em 0.4em;
+  background: var(--purple-bg-mid);
+  border-radius: 4px;
+  border: 1px solid rgba(206,172,224,0.3);
+  color: var(--purple-deep);
+}
+
+/* === Drop Zone === */
+.drop-zone {
+  position: relative;
+  border: 1px solid rgba(206,172,224,0.35);
+  border-radius: var(--r-lg);
+  padding: 4rem 2rem;
+  text-align: center;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.02),
+    0 4px 16px rgba(155,122,175,0.06),
+    inset 0 0 0 6px transparent;
+}
+
+.drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(206,172,224,0.08), transparent 70%);
+  border-radius: inherit;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.drop-zone:hover {
+  border-color: var(--purple);
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(0,0,0,0.03),
+    0 12px 32px rgba(155,122,175,0.12),
+    inset 0 0 0 6px transparent;
+}
+
+.drop-zone.drag-over {
+  border-color: var(--purple-deep);
+  box-shadow:
+    0 2px 4px rgba(0,0,0,0.03),
+    0 12px 32px rgba(155,122,175,0.18),
+    inset 0 0 0 6px rgba(206,172,224,0.08);
+}
+
+.drop-icon {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s;
+}
+
+.drop-icon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--purple-bg-mid), var(--purple-bg));
+  border-radius: 50%;
+  transition: transform 0.25s;
+}
+
+.drop-icon::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border: 1px solid rgba(206,172,224,0.25);
+  border-radius: 50%;
+  transition: transform 0.25s;
+}
+
+.drop-zone:hover .drop-icon::before {
+  transform: scale(1.05);
+}
+
+.drop-zone:hover .drop-icon::after {
+  transform: scale(1.08);
+}
+
+.drop-icon svg {
+  position: relative;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  color: var(--purple-deep);
+}
+
+.drop-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-1);
+  position: relative;
+  letter-spacing: 0.01em;
+}
+
+.drop-hint {
+  font-size: 0.85rem;
+  color: var(--text-3);
+  position: relative;
+}
+
+.drop-hint kbd {
+  display: inline-block;
+  padding: 0.1em 0.45em;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: var(--purple-bg-mid);
+  border-radius: 4px;
+  color: var(--purple-deep);
+  border: 1px solid var(--purple-light);
+}
+
+.file-input {
+  display: none;
+}
+
+/* === Processing State === */
+.processing-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(4px);
+  border-radius: inherit;
+  z-index: 10;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.processing-overlay.active {
+  display: flex;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--purple-light);
+  border-top-color: var(--purple-deep);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.processing-text {
+  font-size: 0.9rem;
+  color: var(--purple-deep);
+  font-weight: 500;
+}
+
+/* === Results === */
+.results-section {
+  display: none;
+  margin-top: 2rem;
+  animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.results-section.visible {
+  display: block;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Overall verdict — certificate-style top bar */
+.verdict-card {
+  position: relative;
+  border-radius: var(--r-lg);
+  padding: 2rem 2.25rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid rgba(206,172,224,0.18);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03), 0 8px 24px rgba(155,122,175,0.06);
+  overflow: hidden;
+}
+
+.verdict-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+}
+
+.verdict-card.pass::before { background: linear-gradient(90deg, var(--success), var(--success-soft)); }
+.verdict-card.fail::before { background: linear-gradient(90deg, var(--error), var(--error-soft)); }
+.verdict-card.partial::before { background: linear-gradient(90deg, var(--warning), var(--warning-soft)); }
+
+.verdict-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  font-weight: 400;
+}
+
+.verdict-card.pass .verdict-icon {
+  background: var(--success-bg);
+  color: var(--success);
+  box-shadow: inset 0 0 0 1px rgba(74,138,126,0.15);
+}
+
+.verdict-card.fail .verdict-icon {
+  background: var(--error-bg);
+  color: var(--error);
+  box-shadow: inset 0 0 0 1px rgba(162,71,71,0.15);
+}
+
+.verdict-card.partial .verdict-icon {
+  background: var(--warning-bg);
+  color: var(--warning);
+  box-shadow: inset 0 0 0 1px rgba(184,121,51,0.15);
+}
+
+.verdict-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+}
+
+.verdict-card.pass .verdict-title { color: var(--success); }
+.verdict-card.fail .verdict-title { color: var(--error); }
+.verdict-card.partial .verdict-title { color: var(--warning); }
+
+.verdict-desc {
+  font-size: 0.88rem;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+/* Detail cards */
+.detail-card {
+  background: var(--bg-card);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(206,172,224,0.22);
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.detail-card.open {
+  border-color: rgba(206,172,224,0.4);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02), 0 6px 18px rgba(155,122,175,0.05);
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1.1rem 1.5rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.detail-header:hover {
+  background: rgba(206,172,224,0.06);
+}
+
+.detail-status {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.detail-status.pass {
+  background: var(--success-bg);
+  color: var(--success);
+  box-shadow: inset 0 0 0 1px rgba(74,138,126,0.2);
+}
+
+.detail-status.fail {
+  background: var(--error-bg);
+  color: var(--error);
+  box-shadow: inset 0 0 0 1px rgba(162,71,71,0.2);
+}
+
+.detail-status.info {
+  background: var(--purple-bg);
+  color: var(--purple-deep);
+  box-shadow: inset 0 0 0 1px rgba(155,122,175,0.2);
+}
+
+.detail-status.warn {
+  background: var(--warning-bg);
+  color: var(--warning);
+  box-shadow: inset 0 0 0 1px rgba(184,121,51,0.2);
+}
+
+.detail-title {
+  flex: 1;
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--text-1);
+  letter-spacing: 0.005em;
+}
+
+.detail-chevron {
+  color: var(--text-3);
+  transition: transform 0.25s;
+  font-size: 0.7rem;
+}
+
+.detail-card.open .detail-chevron {
+  transform: rotate(180deg);
+}
+
+.detail-body {
+  display: none;
+  padding: 0 1.5rem 1.25rem;
+  font-size: 0.88rem;
+  color: var(--text-2);
+  line-height: 1.8;
+}
+
+.detail-card.open .detail-body {
+  display: block;
+  animation: fadeUp 0.3s ease;
+}
+
+/* Data rows */
+.data-row {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  align-items: baseline;
+}
+
+.data-label {
+  font-weight: 500;
+  color: var(--text-2);
+  min-width: 5em;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.data-value {
+  word-break: break-all;
+  color: var(--text-1);
+}
+
+.hash-value {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  background: rgba(206,172,224,0.08);
+  padding: 0.35em 0.65em;
+  border-radius: 6px;
+  display: inline-block;
+  line-height: 1.5;
+  word-break: break-all;
+  border: 1px solid rgba(206,172,224,0.18);
+  color: var(--text-1);
+  letter-spacing: 0.01em;
+}
+
+/* File list in results */
+.file-list {
+  margin-top: 0.5rem;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r-sm);
+  transition: background 0.15s;
+  font-size: 0.85rem;
+}
+
+.file-item:hover {
+  background: var(--purple-bg);
+}
+
+.file-item .file-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item .file-hash {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-3);
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-item .file-status {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+/* Thumbnail */
+.thumbnail-preview {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+.thumbnail-preview img {
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(206,172,224,0.2);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+
+/* Screenshot preview (URL evidence) */
+.screenshot-preview {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+.screenshot-preview img {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(206,172,224,0.2);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+
+/* HTTP headers table */
+.headers-table {
+  width: 100%;
+  font-size: 0.82rem;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.headers-table th,
+.headers-table td {
+  text-align: left;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid rgba(206,172,224,0.12);
+}
+
+.headers-table th {
+  font-weight: 500;
+  color: var(--text-2);
+  width: 30%;
+  white-space: nowrap;
+}
+
+.headers-table td {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-1);
+  word-break: break-all;
+}
+
+/* Explanation card */
+.explain-card {
+  position: relative;
+  background: linear-gradient(180deg, #FBF8FE 0%, #FAF6FC 100%);
+  border: 1px solid rgba(206,172,224,0.22);
+  border-radius: var(--r-lg);
+  padding: 2rem 2rem 1.5rem;
+  margin-top: 3rem;
+  overflow: hidden;
+}
+
+.explain-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), var(--gold-light), var(--gold), transparent);
+  opacity: 0.6;
+}
+
+.explain-card h3 {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--purple-deep);
+  margin-bottom: 1.25rem;
+  letter-spacing: -0.005em;
+}
+
+.explain-card p {
+  font-size: 0.88rem;
+  color: var(--text-2);
+  line-height: 1.9;
+  margin-bottom: 0.5rem;
+}
+
+.explain-card .step {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.explain-card .step:last-of-type {
+  margin-bottom: 1.25rem;
+}
+
+.explain-card .step-num {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, var(--purple), var(--purple-deep));
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  font-family: var(--font-display);
+  box-shadow: 0 2px 4px rgba(155,122,175,0.25);
+}
+
+.explain-card .step-text {
+  font-size: 0.9rem;
+  color: var(--text-2);
+  line-height: 1.75;
+  padding-top: 0.15rem;
+}
+
+.explain-card .step-text strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* Reset button */
+.reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.75rem;
+  padding: 0.65rem 1.4rem;
+  border: 1px solid rgba(206,172,224,0.4);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--purple-deep);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.reset-btn:hover {
+  background: var(--purple-bg);
+  border-color: var(--purple);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(155,122,175,0.15);
+}
+
+.reset-btn:active {
+  transform: translateY(0);
+}
+
+/* Footer */
+.site-footer {
+  text-align: center;
+  margin-top: 4rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid rgba(206,172,224,0.18);
+  font-size: 0.78rem;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+
+.site-footer p {
+  margin: 0.5rem 0;
+}
+
+.site-footer p:first-child {
+  color: var(--text-2);
+  font-size: 0.82rem;
+}
+
+.site-footer a {
+  color: var(--purple-deep);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.site-footer a:hover {
+  color: var(--purple);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Language switcher */
+.lang-switch {
+  position: absolute;
+  top: 1.75rem;
+  right: 1.75rem;
+  display: flex;
+  gap: 0.2rem;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 3px;
+  border: 1px solid rgba(206,172,224,0.25);
+  box-shadow: 0 1px 4px rgba(155,122,175,0.06);
+  z-index: 10;
+}
+
+.lang-btn {
+  padding: 0.32rem 0.75rem;
+  font-size: 0.76rem;
+  font-family: var(--font-body);
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text-3);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: all 0.2s;
+}
+
+.lang-btn:hover:not(.active) {
+  color: var(--purple-deep);
+}
+
+.lang-btn.active {
+  background: linear-gradient(135deg, var(--purple), var(--purple-deep));
+  color: white;
+  box-shadow: 0 1px 3px rgba(155,122,175,0.3);
+}
+
+/* NEP type badge */
+.nep-type-badge {
+  display: inline-block;
+  padding: 0.15em 0.6em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 999px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.nep-type-badge.cert {
+  background: rgba(129,201,149,0.15);
+  color: #2E7D32;
+}
+
+.nep-type-badge.evidence {
+  background: rgba(206,172,224,0.2);
+  color: var(--purple-deep);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .page-wrapper { padding: 2rem 1rem 3rem; }
+  .site-header { margin-bottom: 2.5rem; }
+  .page-title { font-size: 2rem; }
+  .page-subtitle { font-size: 0.88rem; }
+  .drop-zone { padding: 3rem 1.25rem; }
+  .drop-title { font-size: 1.1rem; }
+  .verdict-card { flex-direction: column; text-align: center; padding: 1.75rem 1.5rem; gap: 1rem; }
+  .verdict-title { font-size: 1.3rem; }
+  .detail-header { padding: 0.9rem 1.15rem; }
+  .detail-body { padding: 0 1.15rem 1rem; }
+  .data-row { flex-direction: column; gap: 0.25rem; }
+  .data-label { min-width: 0; }
+  .explain-card { padding: 1.5rem 1.25rem 1.25rem; margin-top: 2rem; }
+  .lang-switch { position: relative; top: 0; right: 0; justify-content: center; margin: 0 auto 1.5rem; width: fit-content; }
+}
+</style>
+</head>
+
+<body>
+
+<div class="page-wrapper">
+  <!-- Language switch -->
+  <div class="lang-switch">
+    <button class="lang-btn active" data-lang="zh" onclick="switchLang('zh')">中文</button>
+    <button class="lang-btn" data-lang="en" onclick="switchLang('en')">EN</button>
+  </div>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="brand-mark">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.5 19H9a4.5 4.5 0 1 1 .5-8.98A6 6 0 0 1 21 12a4 4 0 0 1-3.5 7Z"/>
+        </svg>
+      </div>
+      <span class="brand-name">Nephele</span>
+    </div>
+    <h1 class="page-title" data-i18n="title">
+      数字存证 <span class="accent" data-i18n="titleAccent">独立验证</span>
+    </h1>
+    <p class="page-subtitle" data-i18n="subtitle">
+      上传您的 <kbd>.nep</kbd> 存证文件，本页将在您的浏览器中完成全部验证——不上传任何数据到服务器。
+    </p>
+  </header>
+
+  <!-- Drop Zone -->
+  <div class="drop-zone" id="dropZone">
+    <div class="processing-overlay" id="processingOverlay">
+      <div class="spinner"></div>
+      <div class="processing-text" data-i18n="processing">正在验证存证文件…</div>
+    </div>
+
+    <div class="drop-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+    </div>
+    <div class="drop-title" data-i18n="dropTitle">拖放 .nep 文件到这里</div>
+    <div class="drop-hint" data-i18n="dropHint">或点击选择文件</div>
+    <input type="file" class="file-input" id="fileInput" accept=".nep,.zip">
+  </div>
+
+  <!-- Results -->
+  <div class="results-section" id="resultsSection">
+    <!-- Verdict (injected by JS) -->
+    <div id="verdictContainer"></div>
+
+    <!-- Detail cards (injected by JS) -->
+    <div id="detailsContainer"></div>
+
+    <!-- Thumbnail -->
+    <div id="thumbnailContainer"></div>
+
+    <button class="reset-btn" onclick="resetPage()">
+      <span>↺</span>
+      <span data-i18n="resetBtn">验证另一个文件</span>
+    </button>
+  </div>
+
+  <!-- Explanation -->
+  <div class="explain-card">
+    <h3 data-i18n="explainTitle">这个验证做了什么？</h3>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-text" data-i18n="explainStep1">
+        <strong>文件哈希验证</strong> — 重新计算 manifest.json 中记录的 SHA-256 哈希值，确认原始文件未被篡改。
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-text" data-i18n="explainStep2">
+        <strong>Merkle Tree 重建</strong> — 用所有文件哈希重新构建 Merkle Tree，验证根哈希与存证一致。
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-text" data-i18n="explainStep3">
+        <strong>时间戳解析</strong> — 解析 RFC 3161 标准时间戳令牌（proof.tsa），显示签发机构和签名时间。该令牌由 DigiCert 等受信任第三方签发，证明数据在该时间点已存在。
+      </div>
+    </div>
+    <p data-i18n="explainNote" style="margin-top:0.5rem; font-size:0.82rem; color:var(--text-3);">
+      所有计算均在您的浏览器本地完成，不会上传任何文件或数据。验证结果的可信度来自国际密码学标准，不依赖任何中心化平台。
+    </p>
+  </div>
+
+  <footer class="site-footer">
+    <p>Powered by <a href="https://arisfusion.com" target="_blank">Nephele</a> · ArisFusion Studio</p>
+    <p data-i18n="footerTech">SHA-256 · Merkle Tree · RFC 3161 TSA · 纯前端验证</p>
+    <p data-i18n="footerLicense">源码 MIT 开源 · 浏览器"查看页面源代码"即可审计全部逻辑 · 保存本页即可离线使用</p>
+  </footer>
+</div>
+
+<script>
+// ============================================================
+// Nephele — .nep Verification Engine
+// Pure client-side: JSZip + Web Crypto API + ASN.1 DER parser
+// Supports: Certification .nep + URL Evidence .nep
+// ============================================================
+
+// --- i18n ---
+const I18N = {
+  zh: {
+    title: '数字存证',
+    titleAccent: '独立验证',
+    subtitle: '上传您的 <kbd>.nep</kbd> 存证文件，本页将在您的浏览器中完成全部验证——不上传任何数据到服务器。',
+    dropTitle: '拖放 .nep 文件到这里',
+    dropHint: '或点击选择文件',
+    processing: '正在验证存证文件…',
+    resetBtn: '验证另一个文件',
+    explainTitle: '这个验证做了什么？',
+    explainStep1: '<strong>文件哈希验证</strong> — 重新计算 manifest.json 中记录的 SHA-256 哈希值，确认原始文件未被篡改。',
+    explainStep2: '<strong>Merkle Tree 重建</strong> — 用所有文件哈希重新构建 Merkle Tree，验证根哈希与存证一致。',
+    explainStep3: '<strong>时间戳解析</strong> — 解析 RFC 3161 标准时间戳令牌（proof.tsa），显示签发机构和签名时间。该令牌由 DigiCert 等受信任第三方签发，证明数据在该时间点已存在。',
+    explainNote: '所有计算均在您的浏览器本地完成，不会上传任何文件或数据。验证结果的可信度来自国际密码学标准，不依赖任何中心化平台。',
+    footerTech: 'SHA-256 · Merkle Tree · RFC 3161 TSA · 纯前端验证',
+    footerLicense: '源码 MIT 开源 · 浏览器"查看页面源代码"即可审计全部逻辑 · 保存本页即可离线使用',
+    verdictPassTitle: '存证验证通过',
+    verdictPassDesc: '文件完整性和 Merkle Tree 结构验证通过，时间戳令牌结构有效。',
+    verdictFailTitle: '存证验证未通过',
+    verdictFailDesc: '存证数据存在不一致，请查看下方详细信息。',
+    verdictPartialTitle: '部分验证通过',
+    verdictPartialDesc: '部分检查通过，但存在需要注意的项目。',
+    verdictErrorTitle: '文件解析失败',
+    verdictErrorDesc: '无法解析该文件，请确认是有效的 .nep 存证包。',
+    cardManifest: '清单信息',
+    cardMerkle: 'Merkle Tree 验证',
+    cardTimestamp: '时间戳令牌',
+    cardFiles: '文件列表',
+    cardFileIntegrity: '文件完整性验证',
+    cardManifestIntegrity: '清单自校验',
+    cardEvidenceFiles: '取证文件验证',
+    cardTlsCert: 'TLS 服务器证书',
+    cardServerResponse: '服务器响应头',
+    cardScreenshot: '页面截图预览',
+    cardNetworkTraffic: '网络流量记录',
+    cardEvidenceInfo: '取证信息',
+    labelAuthor: '作者',
+    labelCreated: '创建时间',
+    labelFileCount: '文件数量',
+    labelInspiration: '创作灵感',
+    labelRootHash: '根哈希',
+    labelRebuiltHash: '重建哈希',
+    labelResult: '验证结果',
+    labelTargetUrl: '目标 URL',
+    labelFinalUrl: '最终 URL',
+    labelPageTitle: '页面标题',
+    labelCaptureTime: '取证时间',
+    labelEvidenceId: '取证 ID',
+    labelSubjectCN: '主体 CN',
+    labelIssuerCN: '签发者 CN',
+    labelIssuerOrg: '签发机构',
+    labelSerialNo: '序列号',
+    labelSAN: 'SAN 域名',
+    labelNotBefore: '有效期起',
+    labelNotAfter: '有效期止',
+    labelCertHash: '证书 SHA-256',
+    labelHarSize: 'HAR 文件大小',
+    labelManifestHash: '清单哈希',
+    labelExpectedHash: '预期哈希',
+    labelActualHash: '实际哈希',
+    merkleMatch: 'Merkle Root 与 TSA 签名一致 — 文件集合未被篡改',
+    merkleMismatch: 'Merkle Root 不一致 — 文件可能被篡改',
+    merkleTsaCross: 'TSA 交叉验证',
+    merkleTsaCrossOk: '重建 Merkle Root 与 TSA 令牌中的签名哈希一致',
+    merkleTsaCrossFail: '重建 Merkle Root 与 TSA 令牌中的签名哈希不匹配',
+    labelIssuer: '签发机构',
+    labelTimestamp: '签名时间',
+    labelAlgorithm: '哈希算法',
+    labelSerialNumber: '序列号',
+    tsaValid: '时间戳令牌结构有效',
+    tsaInvalid: '无法解析时间戳令牌',
+    tsaNotFound: '存证包中未包含 proof.tsa 时间戳文件',
+    tsaLocalOnly: '本地时间戳（无 TSA 签名）— 仅供参考',
+    filesLabel: '个文件',
+    thumbnailTitle: '作品缩略图',
+    nepTypeCert: '作品存证',
+    nepTypeEvidence: 'URL 取证',
+    worksVerifyOk: '所有原始文件哈希匹配 — 文件未被篡改',
+    worksVerifyFail: '部分文件哈希不匹配 — 文件可能被篡改',
+    worksVerifyNone: '存证包未包含原始文件（旧版格式），跳过文件完整性验证',
+    manifestHashOk: '清单自校验通过 — 清单内容未被篡改',
+    manifestHashFail: '清单自校验失败 — 清单内容可能被篡改',
+    manifestHashNone: '清单未包含自校验哈希（旧版格式）',
+    evidenceFilesAllOk: '所有取证文件哈希匹配 — 证据未被篡改',
+    evidenceFilesSomeFail: '部分取证文件哈希不匹配 — 证据可能被篡改',
+    harPresent: 'HAR 网络流量记录文件存在于存证包中',
+    harAbsent: '存证包未包含 HAR 网络流量记录',
+    screenshotTitle: '页面截图',
+    disclaimerLabel: '免责声明',
+  },
+  en: {
+    title: 'Digital Certificate',
+    titleAccent: 'Verification',
+    subtitle: 'Upload your <kbd>.nep</kbd> certificate file. All verification runs locally in your browser — nothing is uploaded.',
+    dropTitle: 'Drop .nep file here',
+    dropHint: 'or click to browse',
+    processing: 'Verifying certificate…',
+    resetBtn: 'Verify another file',
+    explainTitle: 'What does this verify?',
+    explainStep1: '<strong>File Hash Check</strong> — Recalculates SHA-256 hashes recorded in manifest.json to confirm original files are untampered.',
+    explainStep2: '<strong>Merkle Tree Rebuild</strong> — Rebuilds the Merkle Tree from all file hashes and verifies the root hash matches.',
+    explainStep3: '<strong>Timestamp Parsing</strong> — Parses the RFC 3161 timestamp token (proof.tsa) to show the issuing authority and signing time. Signed by trusted third parties like DigiCert.',
+    explainNote: 'All computations run locally in your browser. No files or data are uploaded. Trust comes from international cryptographic standards, not any centralized platform.',
+    footerTech: 'SHA-256 · Merkle Tree · RFC 3161 TSA · Client-side only',
+    footerLicense: 'MIT licensed · "View page source" in your browser to audit the full logic · Save this page for offline use',
+    verdictPassTitle: 'Verification Passed',
+    verdictPassDesc: 'File integrity, Merkle Tree structure, and timestamp token are all valid.',
+    verdictFailTitle: 'Verification Failed',
+    verdictFailDesc: 'Inconsistencies found in the certificate data. See details below.',
+    verdictPartialTitle: 'Partial Verification',
+    verdictPartialDesc: 'Some checks passed, but there are items requiring attention.',
+    verdictErrorTitle: 'Parse Error',
+    verdictErrorDesc: 'Unable to parse this file. Please confirm it is a valid .nep certificate.',
+    cardManifest: 'Manifest Info',
+    cardMerkle: 'Merkle Tree Verification',
+    cardTimestamp: 'Timestamp Token',
+    cardFiles: 'File List',
+    cardFileIntegrity: 'File Integrity',
+    cardManifestIntegrity: 'Manifest Self-check',
+    cardEvidenceFiles: 'Evidence File Verification',
+    cardTlsCert: 'TLS Server Certificate',
+    cardServerResponse: 'Server Response Headers',
+    cardScreenshot: 'Screenshot Preview',
+    cardNetworkTraffic: 'Network Traffic',
+    cardEvidenceInfo: 'Evidence Info',
+    labelAuthor: 'Author',
+    labelCreated: 'Created',
+    labelFileCount: 'Files',
+    labelInspiration: 'Inspiration',
+    labelRootHash: 'Root Hash',
+    labelRebuiltHash: 'Rebuilt Hash',
+    labelResult: 'Result',
+    labelTargetUrl: 'Target URL',
+    labelFinalUrl: 'Final URL',
+    labelPageTitle: 'Page Title',
+    labelCaptureTime: 'Capture Time',
+    labelEvidenceId: 'Evidence ID',
+    labelSubjectCN: 'Subject CN',
+    labelIssuerCN: 'Issuer CN',
+    labelIssuerOrg: 'Issuer Org',
+    labelSerialNo: 'Serial No.',
+    labelSAN: 'SAN Domains',
+    labelNotBefore: 'Valid From',
+    labelNotAfter: 'Valid To',
+    labelCertHash: 'Cert SHA-256',
+    labelHarSize: 'HAR File Size',
+    labelManifestHash: 'Manifest Hash',
+    labelExpectedHash: 'Expected Hash',
+    labelActualHash: 'Actual Hash',
+    merkleMatch: 'Merkle Root matches TSA signature — file set is untampered',
+    merkleMismatch: 'Merkle Root mismatch — files may have been modified',
+    merkleTsaCross: 'TSA Cross-check',
+    merkleTsaCrossOk: 'Rebuilt Merkle Root matches the signed hash in TSA token',
+    merkleTsaCrossFail: 'Rebuilt Merkle Root does not match the signed hash in TSA token',
+    labelIssuer: 'Issuer',
+    labelTimestamp: 'Timestamp',
+    labelAlgorithm: 'Algorithm',
+    labelSerialNumber: 'Serial No.',
+    tsaValid: 'Timestamp token structure is valid',
+    tsaInvalid: 'Unable to parse timestamp token',
+    tsaNotFound: 'No proof.tsa timestamp file in the certificate',
+    tsaLocalOnly: 'Local timestamp (no TSA signature) — for reference only',
+    filesLabel: 'files',
+    thumbnailTitle: 'Artwork Thumbnail',
+    nepTypeCert: 'Certification',
+    nepTypeEvidence: 'URL Evidence',
+    worksVerifyOk: 'All original file hashes match — files are untampered',
+    worksVerifyFail: 'Some file hashes do not match — files may have been modified',
+    worksVerifyNone: 'No original files in package (legacy format), file integrity check skipped',
+    manifestHashOk: 'Manifest self-check passed — manifest content is untampered',
+    manifestHashFail: 'Manifest self-check failed — manifest content may have been modified',
+    manifestHashNone: 'Manifest does not include self-check hash (legacy format)',
+    evidenceFilesAllOk: 'All evidence file hashes match — evidence is untampered',
+    evidenceFilesSomeFail: 'Some evidence file hashes do not match — evidence may have been tampered',
+    harPresent: 'HAR network traffic capture file present in evidence package',
+    harAbsent: 'No HAR network traffic file in evidence package',
+    screenshotTitle: 'Page Screenshot',
+    disclaimerLabel: 'Disclaimer',
+  }
+};
+
+let currentLang = 'zh';
+
+function t(key) {
+  return I18N[currentLang][key] || key;
+}
+
+function switchLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll('.lang-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+
+  // Update static i18n elements
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (I18N[lang][key]) {
+      el.innerHTML = I18N[lang][key];
+    }
+  });
+
+  // Re-render results if visible
+  if (lastVerificationResult) {
+    renderResults(lastVerificationResult);
+  }
+}
+
+let lastVerificationResult = null;
+
+// --- Drop zone ---
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const processingOverlay = document.getElementById('processingOverlay');
+
+dropZone.addEventListener('click', (e) => {
+  if (e.target.closest('.processing-overlay')) return;
+  fileInput.click();
+});
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+async function handleFile(file) {
+  processingOverlay.classList.add('active');
+  try {
+    const result = await verifyNep(file);
+    lastVerificationResult = result;
+    renderResults(result);
+  } catch (err) {
+    lastVerificationResult = { error: true, message: err.message };
+    renderResults(lastVerificationResult);
+  } finally {
+    processingOverlay.classList.remove('active');
+  }
+}
+
+function resetPage() {
+  lastVerificationResult = null;
+  document.getElementById('resultsSection').classList.remove('visible');
+  document.getElementById('verdictContainer').innerHTML = '';
+  document.getElementById('detailsContainer').innerHTML = '';
+  document.getElementById('thumbnailContainer').innerHTML = '';
+  fileInput.value = '';
+}
+
+// ============================================================
+// Core Verification Engine
+// ============================================================
+
+// SHA-256 helper for raw bytes (Uint8Array)
+async function sha256bytes(uint8arr) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', uint8arr);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// JSON.stringify with sorted keys (recursive), matching Python's sort_keys=True
+function jsonStringifySorted(obj) {
+  if (obj === null || typeof obj !== 'object') {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(v => jsonStringifySorted(v)).join(',') + ']';
+  }
+  const keys = Object.keys(obj).sort();
+  const pairs = keys.map(k => JSON.stringify(k) + ':' + jsonStringifySorted(obj[k]));
+  return '{' + pairs.join(',') + '}';
+}
+
+async function verifyNep(file) {
+  const arrayBuf = await file.arrayBuffer();
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(arrayBuf);
+  } catch (e) {
+    throw new Error(currentLang === 'zh'
+      ? '无法解压文件：可能不是有效的 .nep 文件，或文件设有密码保护（AES-256 加密的存证包无法在线验证）。'
+      : 'Cannot decompress: file may not be a valid .nep, or it may be password-protected (AES-256 encrypted packages cannot be verified online).');
+  }
+
+  // 1. Parse manifest.json
+  const manifestFile = zip.file('manifest.json');
+  if (!manifestFile) throw new Error(currentLang === 'zh' ? '存证包缺少 manifest.json' : 'Missing manifest.json in package');
+  const manifestText = await manifestFile.async('string');
+  const manifest = JSON.parse(manifestText);
+
+  // Auto-detect .nep type
+  const isEvidence = !!manifest.nephele_evidence_version;
+
+  if (isEvidence) {
+    return await verifyEvidenceNep(zip, manifest);
+  } else {
+    return await verifyCertificationNep(zip, manifest);
+  }
+}
+
+// ============================================================
+// Certification .nep Verification
+// ============================================================
+
+async function verifyCertificationNep(zip, manifest) {
+  const result = {
+    nepType: 'certification',
+    manifest: manifest,
+    merkle: null,
+    tsa: null,
+    thumbnail: null,
+    files: [],
+    worksVerification: null,
+    manifestHashVerification: null,
+  };
+
+  // 2. Rebuild Merkle Tree
+  const fileHashes = manifest.file_hashes || {};
+  const hashList = Object.entries(fileHashes);
+  result.files = hashList.map(([path, hash]) => ({
+    path,
+    hash,
+    name: path.split(/[/\\]/).pop()
+  }));
+
+  if (hashList.length > 0) {
+    const leaves = hashList.map(([, h]) => h);
+    const rebuiltRoot = await buildMerkleTree(leaves);
+    result.merkle = {
+      leaves,
+      rebuiltRoot,
+      expectedRoot: null,
+      match: false,
+      tsaCrossCheck: null,
+    };
+  }
+
+  // 3. Parse proof.tsa or proof.json
+  const tsaFile = zip.file('proof.tsa');
+  if (tsaFile) {
+    const tsaBytes = await tsaFile.async('uint8array');
+    result.tsa = parseTSAToken(tsaBytes);
+
+    // Fallback: proof.tsa may contain JSON (legacy .nep compatibility)
+    if (!result.tsa.valid && !result.tsa.messageHash) {
+      try {
+        const tsaJson = JSON.parse(await tsaFile.async('string'));
+        result.tsa = {
+          valid: false,
+          localOnly: true,
+          timestamp: tsaJson.timestamp || tsaJson.created_at,
+          issuer: 'Local (no TSA)',
+          messageHash: tsaJson.hash || tsaJson.merkle_root,
+        };
+      } catch (e) { /* not JSON either, keep original parse result */ }
+    }
+
+    // Cross-validate: TSA messageImprint should equal the Merkle Root directly
+    if (result.tsa.messageHash && result.merkle) {
+      const directMatch = (result.merkle.rebuiltRoot === result.tsa.messageHash);
+      result.merkle.tsaCrossCheck = {
+        tsaMessageHash: result.tsa.messageHash,
+        rebuiltRoot: result.merkle.rebuiltRoot,
+        match: directMatch,
+      };
+    }
+  } else {
+    // Check for .json fallback (local timestamp, no TSA signature)
+    const tsaJsonFile = zip.file('proof.json');
+    if (tsaJsonFile) {
+      try {
+        const tsaJson = JSON.parse(await tsaJsonFile.async('string'));
+        result.tsa = {
+          valid: false,
+          localOnly: true,
+          timestamp: tsaJson.timestamp || tsaJson.created_at,
+          issuer: 'Local (no TSA)',
+          messageHash: tsaJson.hash || tsaJson.merkle_root,
+        };
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  // Determine Merkle match
+  if (result.merkle) {
+    if (result.merkle.tsaCrossCheck) {
+      result.merkle.match = result.merkle.tsaCrossCheck.match;
+      result.merkle.expectedRoot = result.merkle.rebuiltRoot;
+    } else {
+      const possibleRoot = manifest.merkle_root || manifest.root_hash;
+      if (possibleRoot) {
+        result.merkle.expectedRoot = possibleRoot;
+        result.merkle.match = (result.merkle.rebuiltRoot === possibleRoot);
+      }
+      if (result.tsa && result.tsa.localOnly && result.tsa.messageHash) {
+        result.merkle.expectedRoot = result.tsa.messageHash;
+        result.merkle.match = (result.merkle.rebuiltRoot === result.tsa.messageHash);
+      }
+    }
+  }
+
+  // 4. Verify works/ file contents against works_map
+  const worksMap = manifest.works_map;
+  if (worksMap && Object.keys(worksMap).length > 0) {
+    result.worksVerification = [];
+    for (const [arcname, expectedHash] of Object.entries(worksMap)) {
+      const entry = { arcname, expectedHash, actualHash: null, match: false };
+      const zipEntry = zip.file(arcname);
+      if (zipEntry) {
+        const fileBytes = await zipEntry.async('uint8array');
+        entry.actualHash = await sha256bytes(fileBytes);
+        entry.match = (entry.actualHash === expectedHash);
+      } else {
+        entry.actualHash = null;
+        entry.match = false;
+      }
+      result.worksVerification.push(entry);
+    }
+  }
+
+  // 5. Verify manifest_sha256 self-check
+  if (manifest.manifest_sha256) {
+    const manifestCopy = Object.assign({}, manifest);
+    delete manifestCopy.manifest_sha256;
+    // Certification .nep: only remove manifest_sha256 (no manifest_sha256_note in cert format)
+    const canonicalJson = jsonStringifySorted(manifestCopy);
+    const computedHash = await sha256bytes(new TextEncoder().encode(canonicalJson));
+    result.manifestHashVerification = {
+      expectedHash: manifest.manifest_sha256,
+      actualHash: computedHash,
+      match: computedHash === manifest.manifest_sha256,
+    };
+  }
+
+  // 6. Extract thumbnail
+  const thumbFile = zip.file('thumbnail.jpg');
+  if (thumbFile) {
+    const thumbBlob = await thumbFile.async('blob');
+    result.thumbnail = URL.createObjectURL(thumbBlob);
+  }
+
+  return result;
+}
+
+// ============================================================
+// URL Evidence .nep Verification
+// ============================================================
+
+async function verifyEvidenceNep(zip, manifest) {
+  const result = {
+    nepType: 'evidence',
+    manifest: manifest,
+    tsa: null,
+    filesVerification: [],
+    manifestHashVerification: null,
+    tlsCertificate: manifest.tls_certificate || null,
+    serverResponseHeaders: manifest.server_response_headers || null,
+    screenshotBlob: null,
+    harInfo: null,
+  };
+
+  // 1. Verify each file in manifest.files[]
+  const manifestFiles = manifest.files || [];
+  for (const entry of manifestFiles) {
+    const vEntry = {
+      filename: entry.filename,
+      expectedHash: entry.sha256,
+      actualHash: null,
+      match: false,
+      type: entry.type || 'unknown',
+      size: entry.size || 0,
+    };
+    const zipEntry = zip.file(entry.filename);
+    if (zipEntry) {
+      const fileBytes = await zipEntry.async('uint8array');
+      vEntry.actualHash = await sha256bytes(fileBytes);
+      vEntry.match = (vEntry.actualHash === vEntry.expectedHash);
+    }
+    result.filesVerification.push(vEntry);
+  }
+
+  // 2. Verify manifest_sha256 self-check
+  if (manifest.manifest_sha256) {
+    const manifestCopy = Object.assign({}, manifest);
+    delete manifestCopy.manifest_sha256;
+    delete manifestCopy.manifest_sha256_note;
+    const canonicalJson = jsonStringifySorted(manifestCopy);
+    const computedHash = await sha256bytes(new TextEncoder().encode(canonicalJson));
+    result.manifestHashVerification = {
+      expectedHash: manifest.manifest_sha256,
+      actualHash: computedHash,
+      match: computedHash === manifest.manifest_sha256,
+    };
+  }
+
+  // 3. Parse TSA (manifest.tsa or proof.tsa)
+  const tsaFile = zip.file('manifest.tsa') || zip.file('proof.tsa');
+  if (tsaFile) {
+    const tsaBytes = await tsaFile.async('uint8array');
+    result.tsa = parseTSAToken(tsaBytes);
+
+    // Fallback: may be JSON
+    if (!result.tsa.valid && !result.tsa.messageHash) {
+      try {
+        const tsaJson = JSON.parse(await tsaFile.async('string'));
+        result.tsa = {
+          valid: false,
+          localOnly: true,
+          timestamp: tsaJson.timestamp || tsaJson.created_at,
+          issuer: tsaJson.issuer || 'Local (no TSA)',
+          messageHash: tsaJson.manifest_sha256 || tsaJson.hash,
+        };
+      } catch (e) { /* not JSON */ }
+    }
+  } else {
+    // Check for local timestamp JSON fallback
+    const localTsFile = zip.file('manifest_timestamp.json');
+    if (localTsFile) {
+      try {
+        const tsJson = JSON.parse(await localTsFile.async('string'));
+        result.tsa = {
+          valid: false,
+          localOnly: true,
+          timestamp: tsJson.timestamp,
+          issuer: 'Nephele (local)',
+          messageHash: tsJson.manifest_sha256,
+        };
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  // 4. Extract screenshot for preview
+  const screenshotFile = zip.file('screenshot.png');
+  if (screenshotFile) {
+    const blob = await screenshotFile.async('blob');
+    result.screenshotBlob = URL.createObjectURL(blob);
+  }
+
+  // 5. Check for network.har
+  const harFile = zip.file('network.har');
+  if (harFile) {
+    const harBytes = await harFile.async('uint8array');
+    result.harInfo = {
+      present: true,
+      size: harBytes.length,
+    };
+  } else {
+    result.harInfo = { present: false };
+  }
+
+  return result;
+}
+
+// --- Crypto helpers ---
+
+// --- Merkle Tree (matches Python implementation in utils.py) ---
+async function sha256hex(message) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function buildMerkleTree(leaves) {
+  if (leaves.length === 0) return '';
+  if (leaves.length === 1) return leaves[0];
+
+  let currentLevel = [...leaves];
+  while (currentLevel.length > 1) {
+    const nextLevel = [];
+    for (let i = 0; i < currentLevel.length; i += 2) {
+      let combined;
+      if (i + 1 < currentLevel.length) {
+        combined = currentLevel[i] + currentLevel[i + 1];
+      } else {
+        // Odd node: duplicate last (same as Python impl)
+        combined = currentLevel[i] + currentLevel[i];
+      }
+      const parentHash = await sha256hex(combined);
+      nextLevel.push(parentHash);
+    }
+    currentLevel = nextLevel;
+  }
+  return currentLevel[0];
+}
+
+// --- ASN.1 DER Minimal Parser ---
+// Parses RFC 3161 TSR tokens to extract timestamp, issuer, algorithm, serial number
+// Handles two formats: TimeStampResp and ContentInfo/SignedData
+
+function parseTSAToken(bytes) {
+  const result = {
+    valid: false,
+    issuer: null,
+    timestamp: null,
+    algorithm: null,
+    serialNumber: null,
+    messageHash: null,
+    localOnly: false,
+  };
+
+  if (bytes.length < 20 || bytes[0] !== 0x30) {
+    return result;
+  }
+
+  try {
+    const parsed = parseASN1(bytes, 0);
+    if (!parsed) return result;
+
+    // Deep-walk the ASN.1 tree to find useful fields
+    const allNodes = flattenASN1(parsed);
+
+    // Find OIDs to determine structure
+    const oids = allNodes.filter(n => n.tag === 0x06).map(n => decodeOID(n.value));
+
+    // Extract hash algorithm
+    if (oids.includes('2.16.840.1.101.3.4.2.1')) {
+      result.algorithm = 'SHA-256';
+    } else if (oids.includes('2.16.840.1.101.3.4.2.2')) {
+      result.algorithm = 'SHA-384';
+    } else if (oids.includes('2.16.840.1.101.3.4.2.3')) {
+      result.algorithm = 'SHA-512';
+    } else if (oids.includes('1.3.14.3.2.26')) {
+      result.algorithm = 'SHA-1';
+    }
+
+    // Find OCTET STRINGs that look like a SHA-256 hash (32 bytes = 64 hex)
+    const octetStrings = allNodes.filter(n => n.tag === 0x04 && n.value);
+    for (const os of octetStrings) {
+      if (os.value.length === 32) {
+        const hexHash = Array.from(os.value).map(b => b.toString(16).padStart(2, '0')).join('');
+        result.messageHash = hexHash;
+        break; // Take the first 32-byte octet string (message imprint hash)
+      }
+    }
+
+    // Find UTCTime or GeneralizedTime for timestamp
+    const timeNodes = allNodes.filter(n => n.tag === 0x17 || n.tag === 0x18);
+    for (const tn of timeNodes) {
+      const timeStr = new TextDecoder().decode(tn.value);
+      const parsed = parseASN1Time(timeStr, tn.tag);
+      if (parsed) {
+        result.timestamp = parsed;
+        break;
+      }
+    }
+
+    // Find issuer (look for common CN OID: 2.5.4.3)
+    for (let i = 0; i < allNodes.length - 1; i++) {
+      if (allNodes[i].tag === 0x06) {
+        const oid = decodeOID(allNodes[i].value);
+        if (oid === '2.5.4.3') { // commonName
+          const nextNode = allNodes[i + 1];
+          if (nextNode && (nextNode.tag === 0x13 || nextNode.tag === 0x0C || nextNode.tag === 0x16)) {
+            const name = new TextDecoder().decode(nextNode.value);
+            if (!result.issuer || name.toLowerCase().includes('tsa') || name.toLowerCase().includes('timestamp')) {
+              result.issuer = name;
+            }
+          }
+        }
+        // Organization (2.5.4.10)
+        if (oid === '2.5.4.10' && !result.issuer) {
+          const nextNode = allNodes[i + 1];
+          if (nextNode && (nextNode.tag === 0x13 || nextNode.tag === 0x0C || nextNode.tag === 0x16)) {
+            result.issuer = new TextDecoder().decode(nextNode.value);
+          }
+        }
+      }
+    }
+
+    // Find serial number (INTEGER, typically first large integer after initial SEQUENCE)
+    const integers = allNodes.filter(n => n.tag === 0x02 && n.value && n.value.length >= 4);
+    if (integers.length > 0) {
+      const sn = Array.from(integers[0].value).map(b => b.toString(16).padStart(2, '0')).join('');
+      result.serialNumber = sn;
+    }
+
+    result.valid = !!(result.timestamp || result.issuer);
+
+  } catch (e) {
+    console.warn('ASN.1 parse error:', e);
+    result.valid = false;
+  }
+
+  return result;
+}
+
+function parseASN1(bytes, offset) {
+  if (offset >= bytes.length) return null;
+
+  const tag = bytes[offset];
+  let lenOffset = offset + 1;
+  let length = 0;
+
+  if (bytes[lenOffset] < 0x80) {
+    length = bytes[lenOffset];
+    lenOffset += 1;
+  } else {
+    const numBytes = bytes[lenOffset] & 0x7F;
+    lenOffset += 1;
+    for (let i = 0; i < numBytes; i++) {
+      length = (length << 8) | bytes[lenOffset + i];
+    }
+    lenOffset += numBytes;
+  }
+
+  const valueStart = lenOffset;
+  const valueEnd = valueStart + length;
+
+  const tagClass = (tag >> 6) & 0x03;
+  let isConstructed = (tag & 0x20) !== 0;
+
+  // Context-specific tags (class=2, e.g. [0], [1]) are usually constructed in CMS
+  if (tagClass === 2) {
+    isConstructed = true;
+  }
+
+  // OCTET STRING (0x04) that contains a SEQUENCE (0x30) inside:
+  // CMS wraps TSTInfo in an OCTET STRING — we must parse its contents recursively
+  if (tag === 0x04 && length > 2 && bytes[valueStart] === 0x30) {
+    isConstructed = true;
+  }
+
+  if (isConstructed) {
+    const children = [];
+    let childOffset = valueStart;
+    try {
+      while (childOffset < valueEnd) {
+        const child = parseASN1(bytes, childOffset);
+        if (!child) break;
+        children.push(child);
+        childOffset = child.end;
+      }
+    } catch (e) {
+      // If recursive parsing fails, fall back to treating as primitive
+      return { tag, value: bytes.slice(valueStart, valueEnd), offset, end: valueEnd, children: null };
+    }
+    return { tag, children, offset, end: valueEnd, value: null };
+  } else {
+    return { tag, value: bytes.slice(valueStart, valueEnd), offset, end: valueEnd, children: null };
+  }
+}
+
+function flattenASN1(node) {
+  const result = [node];
+  if (node.children) {
+    for (const child of node.children) {
+      result.push(...flattenASN1(child));
+    }
+  }
+  return result;
+}
+
+function decodeOID(bytes) {
+  if (!bytes || bytes.length === 0) return '';
+  const components = [];
+  components.push(Math.floor(bytes[0] / 40));
+  components.push(bytes[0] % 40);
+  let value = 0;
+  for (let i = 1; i < bytes.length; i++) {
+    value = (value << 7) | (bytes[i] & 0x7F);
+    if ((bytes[i] & 0x80) === 0) {
+      components.push(value);
+      value = 0;
+    }
+  }
+  return components.join('.');
+}
+
+function parseASN1Time(str, tag) {
+  try {
+    if (tag === 0x17) {
+      // UTCTime: YYMMDDHHmmSSZ
+      const y = parseInt(str.substring(0, 2));
+      const year = y >= 50 ? 1900 + y : 2000 + y;
+      const month = str.substring(2, 4);
+      const day = str.substring(4, 6);
+      const hour = str.substring(6, 8);
+      const min = str.substring(8, 10);
+      const sec = str.substring(10, 12);
+      return `${year}-${month}-${day} ${hour}:${min}:${sec} UTC`;
+    } else if (tag === 0x18) {
+      // GeneralizedTime: YYYYMMDDHHmmSS[.fff]Z
+      const year = str.substring(0, 4);
+      const month = str.substring(4, 6);
+      const day = str.substring(6, 8);
+      const hour = str.substring(8, 10);
+      const min = str.substring(10, 12);
+      const sec = str.substring(12, 14);
+      return `${year}-${month}-${day} ${hour}:${min}:${sec} UTC`;
+    }
+  } catch (e) { }
+  return null;
+}
+
+// ============================================================
+// Render Results
+// ============================================================
+
+function renderResults(data) {
+  const resultsSection = document.getElementById('resultsSection');
+  const verdictContainer = document.getElementById('verdictContainer');
+  const detailsContainer = document.getElementById('detailsContainer');
+  const thumbnailContainer = document.getElementById('thumbnailContainer');
+
+  verdictContainer.innerHTML = '';
+  detailsContainer.innerHTML = '';
+  thumbnailContainer.innerHTML = '';
+
+  if (data.error) {
+    verdictContainer.innerHTML = buildVerdict('fail', t('verdictErrorTitle'), data.message || t('verdictErrorDesc'));
+    resultsSection.classList.add('visible');
+    return;
+  }
+
+  if (data.nepType === 'evidence') {
+    renderEvidenceResults(data, verdictContainer, detailsContainer, thumbnailContainer);
+  } else {
+    renderCertificationResults(data, verdictContainer, detailsContainer, thumbnailContainer);
+  }
+
+  // Attach toggle listeners
+  detailsContainer.querySelectorAll('.detail-header').forEach(header => {
+    header.addEventListener('click', () => {
+      header.closest('.detail-card').classList.toggle('open');
+    });
+  });
+  thumbnailContainer.querySelectorAll('.detail-header').forEach(header => {
+    header.addEventListener('click', () => {
+      header.closest('.detail-card').classList.toggle('open');
+    });
+  });
+
+  resultsSection.classList.add('visible');
+}
+
+// ============================================================
+// Render: Certification .nep
+// ============================================================
+
+function renderCertificationResults(data, verdictContainer, detailsContainer, thumbnailContainer) {
+  const merkleOk = data.merkle && data.merkle.match;
+  const tsaOk = data.tsa && data.tsa.valid;
+  const tsaLocal = data.tsa && data.tsa.localOnly;
+  const hasWorks = data.worksVerification && data.worksVerification.length > 0;
+  const worksOk = hasWorks && data.worksVerification.every(w => w.match);
+  const manifestOk = data.manifestHashVerification && data.manifestHashVerification.match;
+  const hasManifestHash = !!data.manifestHashVerification;
+
+  let verdict = 'pass';
+  let verdictTitle = t('verdictPassTitle');
+  let verdictDesc = t('verdictPassDesc');
+
+  if ((hasWorks && !worksOk) || (hasManifestHash && !manifestOk) || (!merkleOk && data.merkle)) {
+    // Something we CAN check has failed
+    verdict = 'fail';
+    verdictTitle = t('verdictFailTitle');
+    verdictDesc = t('verdictFailDesc');
+  } else if (!hasWorks || !hasManifestHash) {
+    // Old format: no original files or no manifest hash — cannot fully verify
+    verdict = 'partial';
+    verdictTitle = t('verdictPartialTitle');
+    verdictDesc = currentLang === 'zh'
+      ? '此存证包为旧版本格式，不包含原始文件，无法独立验证文件完整性。Merkle Tree 结构一致，但仅供参考。'
+      : 'This is a legacy package without original files. File integrity cannot be independently verified. Merkle Tree structure is consistent but only for reference.';
+  } else if (tsaLocal || (!data.tsa && data.merkle)) {
+    verdict = 'partial';
+    verdictTitle = t('verdictPartialTitle');
+    verdictDesc = t('verdictPartialDesc');
+  }
+
+  verdictContainer.innerHTML = buildVerdict(verdict, verdictTitle + ' <span class="nep-type-badge cert">' + t('nepTypeCert') + '</span>', verdictDesc);
+
+  let html = '';
+
+  // 1. Manifest info
+  if (data.manifest) {
+    const m = data.manifest;
+    const author = m.author?.name || '—';
+    const created = m.created_at ? formatDate(m.created_at) : '—';
+    const fileCount = m.total_files || Object.keys(m.file_hashes || {}).length;
+    const inspiration = m.author?.inspiration;
+
+    let body = `
+      <div class="data-row"><span class="data-label">${t('labelAuthor')}</span><span class="data-value">${esc(author)}</span></div>
+      <div class="data-row"><span class="data-label">${t('labelCreated')}</span><span class="data-value">${esc(created)}</span></div>
+      <div class="data-row"><span class="data-label">${t('labelFileCount')}</span><span class="data-value">${fileCount} ${t('filesLabel')}</span></div>
+    `;
+    if (inspiration) {
+      body += `<div class="data-row"><span class="data-label">${t('labelInspiration')}</span><span class="data-value">${esc(inspiration)}</span></div>`;
+    }
+    html += buildDetailCard('info', t('cardManifest'), body, true);
+  }
+
+  // 2. Merkle Tree
+  if (data.merkle) {
+    const mk = data.merkle;
+    const status = mk.match ? 'pass' : 'fail';
+    const resultText = mk.match ? t('merkleMatch') : t('merkleMismatch');
+    let body = '';
+    body += `<div class="data-row"><span class="data-label">${t('labelRebuiltHash')}</span><span class="data-value"><span class="hash-value">${mk.rebuiltRoot}</span></span></div>`;
+
+    if (mk.tsaCrossCheck) {
+      const tc = mk.tsaCrossCheck;
+      body += `<div class="data-row"><span class="data-label">${t('merkleTsaCross')}</span><span class="data-value" style="font-weight:500; color: ${tc.match ? '#2E7D32' : '#C62828'}">${tc.match ? '✓' : '✗'} ${tc.match ? t('merkleTsaCrossOk') : t('merkleTsaCrossFail')}</span></div>`;
+      body += `<div class="data-row" style="margin-left:5em;"><span class="data-label" style="min-width:7em; font-size:0.8rem;">Merkle Root</span><span class="data-value"><span class="hash-value" style="font-size:0.72rem;">${tc.rebuiltRoot}</span></span></div>`;
+      body += `<div class="data-row" style="margin-left:5em;"><span class="data-label" style="min-width:7em; font-size:0.8rem;">TSA hash</span><span class="data-value"><span class="hash-value" style="font-size:0.72rem;">${tc.tsaMessageHash}</span></span></div>`;
+    } else if (mk.expectedRoot && mk.expectedRoot !== mk.rebuiltRoot) {
+      body += `<div class="data-row"><span class="data-label">${t('labelRootHash')}</span><span class="data-value"><span class="hash-value">${mk.expectedRoot}</span></span></div>`;
+    }
+
+    body += `<div class="data-row" style="margin-top:0.3rem;"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="font-weight:500; color: ${mk.match ? '#2E7D32' : '#C62828'}">${status === 'pass' ? '✓' : '✗'} ${resultText}</span></div>`;
+
+    html += buildDetailCard(status, t('cardMerkle'), body, true);
+  }
+
+  // 3. File Integrity (works/ verification)
+  if (data.worksVerification && data.worksVerification.length > 0) {
+    const allMatch = data.worksVerification.every(w => w.match);
+    const status = allMatch ? 'pass' : 'fail';
+    const resultText = allMatch ? t('worksVerifyOk') : t('worksVerifyFail');
+    let body = `<div class="data-row" style="margin-bottom:0.5rem;"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="font-weight:500; color: ${allMatch ? '#2E7D32' : '#C62828'}">${allMatch ? '✓' : '✗'} ${resultText}</span></div>`;
+    body += '<div class="file-list">';
+    for (const w of data.worksVerification) {
+      const icon = w.match ? '<span style="color:#2E7D32">✓</span>' : (w.actualHash === null ? '<span style="color:#E65100">?</span>' : '<span style="color:#C62828">✗</span>');
+      const shortName = w.arcname.split(/[/\\]/).pop();
+      const hashDisplay = w.actualHash ? w.actualHash.substring(0, 12) + '…' : 'N/A';
+      body += `
+        <div class="file-item">
+          <span class="file-status">${icon}</span>
+          <span class="file-name" title="${esc(w.arcname)}">${esc(shortName)}</span>
+          <span class="file-hash" title="${w.actualHash || ''}">${hashDisplay}</span>
+        </div>`;
+    }
+    body += '</div>';
+    html += buildDetailCard(status, t('cardFileIntegrity'), body, true);
+  } else if (data.manifest && data.manifest.works_map) {
+    // works_map exists but no files found in ZIP
+    html += buildDetailCard('warn', t('cardFileIntegrity'), `<p style="color:#E65100;">⚠ ${t('worksVerifyNone')}</p>`, false);
+  }
+
+  // 4. Manifest self-check
+  if (data.manifestHashVerification) {
+    const mhv = data.manifestHashVerification;
+    const status = mhv.match ? 'pass' : 'fail';
+    const resultText = mhv.match ? t('manifestHashOk') : t('manifestHashFail');
+    let body = `<div class="data-row"><span class="data-label">${t('labelExpectedHash')}</span><span class="data-value"><span class="hash-value">${mhv.expectedHash}</span></span></div>`;
+    body += `<div class="data-row"><span class="data-label">${t('labelActualHash')}</span><span class="data-value"><span class="hash-value">${mhv.actualHash}</span></span></div>`;
+    body += `<div class="data-row" style="margin-top:0.3rem;"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="font-weight:500; color: ${mhv.match ? '#2E7D32' : '#C62828'}">${mhv.match ? '✓' : '✗'} ${resultText}</span></div>`;
+    html += buildDetailCard(status, t('cardManifestIntegrity'), body, !mhv.match);
+  }
+
+  // 5. TSA
+  if (data.tsa) {
+    html += buildTSACard(data.tsa);
+  } else {
+    html += buildDetailCard('warn', t('cardTimestamp'), `<p style="color:#E65100;">⚠ ${t('tsaNotFound')}</p>`, false);
+  }
+
+  // 6. File list
+  if (data.files && data.files.length > 0) {
+    let body = '<div class="file-list">';
+    for (const f of data.files) {
+      body += `
+        <div class="file-item">
+          <span class="file-status">📄</span>
+          <span class="file-name" title="${esc(f.path)}">${esc(f.name)}</span>
+          <span class="file-hash" title="${f.hash}">${f.hash.substring(0, 12)}…</span>
+        </div>`;
+    }
+    body += '</div>';
+    html += buildDetailCard('info', `${t('cardFiles')} (${data.files.length})`, body, false);
+  }
+
+  detailsContainer.innerHTML = html;
+
+  // Thumbnail
+  if (data.thumbnail) {
+    thumbnailContainer.innerHTML = `
+      <div class="detail-card open" style="margin-top:1rem">
+        <div class="detail-header">
+          <span class="detail-status info">🖼</span>
+          <span class="detail-title">${t('thumbnailTitle')}</span>
+        </div>
+        <div class="detail-body" style="display:block; text-align:center;">
+          <div class="thumbnail-preview">
+            <img src="${data.thumbnail}" alt="Thumbnail" />
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+// ============================================================
+// Render: URL Evidence .nep
+// ============================================================
+
+function renderEvidenceResults(data, verdictContainer, detailsContainer, thumbnailContainer) {
+  const filesOk = data.filesVerification.length === 0 || data.filesVerification.every(f => f.match);
+  const manifestOk = !data.manifestHashVerification || data.manifestHashVerification.match;
+  const tsaOk = data.tsa && data.tsa.valid;
+  const tsaLocal = data.tsa && data.tsa.localOnly;
+
+  let verdict = 'pass';
+  let verdictTitle = t('verdictPassTitle');
+  let verdictDesc = t('verdictPassDesc');
+
+  if (!filesOk || (data.manifestHashVerification && !manifestOk)) {
+    verdict = 'fail';
+    verdictTitle = t('verdictFailTitle');
+    verdictDesc = t('verdictFailDesc');
+  } else if (tsaLocal || !data.tsa) {
+    verdict = 'partial';
+    verdictTitle = t('verdictPartialTitle');
+    verdictDesc = t('verdictPartialDesc');
+  }
+
+  verdictContainer.innerHTML = buildVerdict(verdict, verdictTitle + ' <span class="nep-type-badge evidence">' + t('nepTypeEvidence') + '</span>', verdictDesc);
+
+  let html = '';
+  const m = data.manifest;
+
+  // 1. Evidence Info
+  {
+    let body = '';
+    if (m.target_url) body += `<div class="data-row"><span class="data-label">${t('labelTargetUrl')}</span><span class="data-value"><a href="${esc(m.target_url)}" target="_blank" rel="noopener" style="color:var(--purple-deep);">${esc(m.target_url)}</a></span></div>`;
+    if (m.final_url && m.final_url !== m.target_url) body += `<div class="data-row"><span class="data-label">${t('labelFinalUrl')}</span><span class="data-value">${esc(m.final_url)}</span></div>`;
+    if (m.page_title) body += `<div class="data-row"><span class="data-label">${t('labelPageTitle')}</span><span class="data-value">${esc(m.page_title)}</span></div>`;
+    if (m.capture_time_utc) body += `<div class="data-row"><span class="data-label">${t('labelCaptureTime')}</span><span class="data-value">${esc(formatDate(m.capture_time_utc))}</span></div>`;
+    if (m.evidence_id) body += `<div class="data-row"><span class="data-label">${t('labelEvidenceId')}</span><span class="data-value"><span class="hash-value">${esc(m.evidence_id)}</span></span></div>`;
+    if (m.disclaimer) body += `<div class="data-row" style="margin-top:0.5rem;"><span class="data-label">${t('disclaimerLabel')}</span><span class="data-value" style="font-size:0.82rem; color:var(--text-3);">${esc(m.disclaimer)}</span></div>`;
+    html += buildDetailCard('info', t('cardEvidenceInfo'), body, true);
+  }
+
+  // 2. Evidence Files Verification
+  if (data.filesVerification.length > 0) {
+    const allMatch = data.filesVerification.every(f => f.match);
+    const status = allMatch ? 'pass' : 'fail';
+    const resultText = allMatch ? t('evidenceFilesAllOk') : t('evidenceFilesSomeFail');
+    let body = `<div class="data-row" style="margin-bottom:0.5rem;"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="font-weight:500; color: ${allMatch ? '#2E7D32' : '#C62828'}">${allMatch ? '✓' : '✗'} ${resultText}</span></div>`;
+    body += '<div class="file-list">';
+    for (const f of data.filesVerification) {
+      const icon = f.match ? '<span style="color:#2E7D32">✓</span>' : (f.actualHash === null ? '<span style="color:#E65100">?</span>' : '<span style="color:#C62828">✗</span>');
+      const shortName = f.filename.split(/[/\\]/).pop();
+      const typeLabel = f.type ? ` <span style="color:var(--text-3); font-size:0.72rem;">[${esc(f.type)}]</span>` : '';
+      const hashDisplay = f.actualHash ? f.actualHash.substring(0, 12) + '…' : 'N/A';
+      body += `
+        <div class="file-item">
+          <span class="file-status">${icon}</span>
+          <span class="file-name" title="${esc(f.filename)}">${esc(shortName)}${typeLabel}</span>
+          <span class="file-hash" title="${f.actualHash || ''}">${hashDisplay}</span>
+        </div>`;
+    }
+    body += '</div>';
+    html += buildDetailCard(status, `${t('cardEvidenceFiles')} (${data.filesVerification.length})`, body, true);
+  }
+
+  // 3. Manifest self-check
+  if (data.manifestHashVerification) {
+    const mhv = data.manifestHashVerification;
+    const status = mhv.match ? 'pass' : 'fail';
+    const resultText = mhv.match ? t('manifestHashOk') : t('manifestHashFail');
+    let body = `<div class="data-row"><span class="data-label">${t('labelExpectedHash')}</span><span class="data-value"><span class="hash-value">${mhv.expectedHash}</span></span></div>`;
+    body += `<div class="data-row"><span class="data-label">${t('labelActualHash')}</span><span class="data-value"><span class="hash-value">${mhv.actualHash}</span></span></div>`;
+    body += `<div class="data-row" style="margin-top:0.3rem;"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="font-weight:500; color: ${mhv.match ? '#2E7D32' : '#C62828'}">${mhv.match ? '✓' : '✗'} ${resultText}</span></div>`;
+    html += buildDetailCard(status, t('cardManifestIntegrity'), body, !mhv.match);
+  }
+
+  // 4. TSA
+  if (data.tsa) {
+    html += buildTSACard(data.tsa);
+  } else {
+    html += buildDetailCard('warn', t('cardTimestamp'), `<p style="color:#E65100;">⚠ ${t('tsaNotFound')}</p>`, false);
+  }
+
+  // 5. TLS Certificate
+  if (data.tlsCertificate && !data.tlsCertificate.error) {
+    const tls = data.tlsCertificate;
+    let body = '';
+    if (tls.subject_cn) body += `<div class="data-row"><span class="data-label">${t('labelSubjectCN')}</span><span class="data-value">${esc(tls.subject_cn)}</span></div>`;
+    if (tls.issuer_cn) body += `<div class="data-row"><span class="data-label">${t('labelIssuerCN')}</span><span class="data-value">${esc(tls.issuer_cn)}</span></div>`;
+    if (tls.issuer_org) body += `<div class="data-row"><span class="data-label">${t('labelIssuerOrg')}</span><span class="data-value">${esc(tls.issuer_org)}</span></div>`;
+    if (tls.serial_number) body += `<div class="data-row"><span class="data-label">${t('labelSerialNo')}</span><span class="data-value"><span class="hash-value">${esc(tls.serial_number)}</span></span></div>`;
+    if (tls.san && tls.san.length > 0) body += `<div class="data-row"><span class="data-label">${t('labelSAN')}</span><span class="data-value">${esc(tls.san.join(', '))}</span></div>`;
+    if (tls.not_before) body += `<div class="data-row"><span class="data-label">${t('labelNotBefore')}</span><span class="data-value">${esc(tls.not_before)}</span></div>`;
+    if (tls.not_after) body += `<div class="data-row"><span class="data-label">${t('labelNotAfter')}</span><span class="data-value">${esc(tls.not_after)}</span></div>`;
+    if (tls.der_sha256) body += `<div class="data-row"><span class="data-label">${t('labelCertHash')}</span><span class="data-value"><span class="hash-value">${esc(tls.der_sha256)}</span></span></div>`;
+    html += buildDetailCard('info', t('cardTlsCert'), body, false);
+  }
+
+  // 6. Server Response Headers
+  if (data.serverResponseHeaders) {
+    const headers = data.serverResponseHeaders.server_headers || {};
+    const headerKeys = Object.keys(headers);
+    if (headerKeys.length > 0) {
+      let body = '<table class="headers-table">';
+      for (const [k, v] of Object.entries(headers)) {
+        body += `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`;
+      }
+      body += '</table>';
+      // Also show non-header fields if present
+      if (data.serverResponseHeaders.response_status) {
+        body += `<div class="data-row" style="margin-top:0.5rem;"><span class="data-label">HTTP Status</span><span class="data-value">${esc(String(data.serverResponseHeaders.response_status))}</span></div>`;
+      }
+      html += buildDetailCard('info', t('cardServerResponse'), body, false);
+    }
+  }
+
+  // 7. Network Traffic (HAR)
+  if (data.harInfo) {
+    const present = data.harInfo.present;
+    const status = present ? 'info' : 'warn';
+    let body = '';
+    if (present) {
+      const sizeKB = Math.round(data.harInfo.size / 1024);
+      body = `<div class="data-row"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="color:var(--purple-deep);">✓ ${t('harPresent')}</span></div>`;
+      body += `<div class="data-row"><span class="data-label">${t('labelHarSize')}</span><span class="data-value">${sizeKB} KB</span></div>`;
+    } else {
+      body = `<p style="color:#E65100;">⚠ ${t('harAbsent')}</p>`;
+    }
+    html += buildDetailCard(status, t('cardNetworkTraffic'), body, false);
+  }
+
+  detailsContainer.innerHTML = html;
+
+  // 8. Screenshot Preview
+  if (data.screenshotBlob) {
+    thumbnailContainer.innerHTML = `
+      <div class="detail-card open" style="margin-top:1rem">
+        <div class="detail-header">
+          <span class="detail-status info">🖼</span>
+          <span class="detail-title">${t('cardScreenshot')}</span>
+        </div>
+        <div class="detail-body" style="display:block; text-align:center;">
+          <div class="screenshot-preview">
+            <img src="${data.screenshotBlob}" alt="Screenshot" />
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+// ============================================================
+// Shared rendering helpers
+// ============================================================
+
+function buildTSACard(ts) {
+  let status, body;
+
+  if (ts.localOnly) {
+    status = 'warn';
+    body = `<div class="data-row"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="color:#E65100;">⚠ ${t('tsaLocalOnly')}</span></div>`;
+    if (ts.timestamp) body += `<div class="data-row"><span class="data-label">${t('labelTimestamp')}</span><span class="data-value">${esc(ts.timestamp)}</span></div>`;
+  } else if (ts.valid) {
+    status = 'pass';
+    body = '';
+    if (ts.issuer) body += `<div class="data-row"><span class="data-label">${t('labelIssuer')}</span><span class="data-value">${esc(ts.issuer)}</span></div>`;
+    if (ts.timestamp) body += `<div class="data-row"><span class="data-label">${t('labelTimestamp')}</span><span class="data-value">${esc(ts.timestamp)}</span></div>`;
+    if (ts.algorithm) body += `<div class="data-row"><span class="data-label">${t('labelAlgorithm')}</span><span class="data-value">${esc(ts.algorithm)}</span></div>`;
+    if (ts.serialNumber) body += `<div class="data-row"><span class="data-label">${t('labelSerialNumber')}</span><span class="data-value"><span class="hash-value">${ts.serialNumber}</span></span></div>`;
+    if (ts.messageHash) body += `<div class="data-row"><span class="data-label">Message Hash</span><span class="data-value"><span class="hash-value">${ts.messageHash}</span></span></div>`;
+    body += `<div class="data-row"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="color:#2E7D32; font-weight:500;">✓ ${t('tsaValid')}</span></div>`;
+  } else {
+    status = 'fail';
+    body = `<div class="data-row"><span class="data-label">${t('labelResult')}</span><span class="data-value" style="color:#C62828;">✗ ${t('tsaInvalid')}</span></div>`;
+  }
+
+  return buildDetailCard(status, t('cardTimestamp'), body, true);
+}
+
+function buildVerdict(type, title, desc) {
+  const icons = { pass: '✓', fail: '✗', partial: '⚠' };
+  return `
+    <div class="verdict-card ${type}">
+      <div class="verdict-icon">${icons[type] || '?'}</div>
+      <div>
+        <div class="verdict-title">${title}</div>
+        <div class="verdict-desc">${desc}</div>
+      </div>
+    </div>`;
+}
+
+function buildDetailCard(status, title, body, openByDefault) {
+  return `
+    <div class="detail-card ${openByDefault ? 'open' : ''}">
+      <div class="detail-header">
+        <span class="detail-status ${status}">${status === 'pass' ? '✓' : status === 'fail' ? '✗' : status === 'warn' ? '⚠' : 'ℹ'}</span>
+        <span class="detail-title">${title}</span>
+        <span class="detail-chevron">▼</span>
+      </div>
+      <div class="detail-body">${body}</div>
+    </div>`;
+}
+
+function formatDate(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch (e) {
+    return isoStr;
+  }
+}
+
+function esc(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+</script>
+
+</body>
+</html>
