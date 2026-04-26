@@ -89,3 +89,4 @@ MIT, see [LICENSE](LICENSE). Free to fork, mirror, embed, modify.
 
 - [nephele-core-audit](https://github.com/CreatorAris/nephele-core-audit) — auditable subset of the Nephele Workshop client (rights / packer / validator)
 - [nephele-wisp](https://github.com/CreatorAris/nephele-wisp) — browser-side companion (Chrome / Edge extension)
+- [nephele-remote](https://github.com/CreatorAris/nephele-remote) — mobile companion (Expo / React Native app)

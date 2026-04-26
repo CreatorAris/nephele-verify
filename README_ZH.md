@@ -89,3 +89,4 @@ MIT，见 [LICENSE](LICENSE)。可自由 fork、镜像、嵌入、修改。
 
 - [nephele-core-audit](https://github.com/CreatorAris/nephele-core-audit) —— Nephele Workshop 客户端的可审计代码子集（rights / packer / validator）
 - [nephele-wisp](https://github.com/CreatorAris/nephele-wisp) —— 浏览器侧伴侣（Chrome / Edge 扩展）
+- [nephele-remote](https://github.com/CreatorAris/nephele-remote) —— 移动伴侣（Expo / React Native 应用）
